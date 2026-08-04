@@ -768,7 +768,7 @@ function renderAssets(){const d=state.daily;const n=d.dates.length;
     mkAsset('全局经验 · 每日存量','全局经验','#2e86c1',R.series[2]);
   document.getElementById('view').innerHTML=cards+bar+chart;
 }
-function downsample(arr,max){if(arr.length<=max)return arr.slice();const step=Math.ceil(arr.length/max);const out=[];for(let i=0;i<arr.length;i+=step)out.push(arr[i]);if(out[out.length-1]!==arr[arr.length-1])out.push(arr[arr.length-1]);return out;}
+function downsample(arr,max){if(arr.length<=max)return arr.slice();const step=Math.ceil(arr.length/max);const out=[];for(let i=0;i<arr.length;i+=step)out.push(arr[i]);if((out.length-1)*step<arr.length-1)out.push(arr[arr.length-1]);return out;}
 /* 资产三种虚拟货币总额：点击手动修改最新一日的值，并计入当日数据统计 */
 function editAsset(g){if(!state||!state.daily||!state.daily[g])return;ensureTodayDaily();const d=state.daily;const n=d.dates.length;const cur=d[g][n-1]||0;const label={gold:'金币',silver:'银币',globalxp:'全局经验'}[g]||g;const v=prompt('修改「'+label+'」最新总额（当前 '+fmt(cur)+'）：',String(cur));if(v===null)return;const num=Number(v);if(isNaN(num)){toast('请输入有效数字');return;}d[g][n-1]=Math.round(num);recordDaily();save();renderAssets();toast('已更新'+label+'总额');}
 
