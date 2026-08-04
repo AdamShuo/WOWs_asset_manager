@@ -103,6 +103,23 @@ main{padding:16px;max-width:1100px;margin:0 auto;padding-bottom:80px}
 .ctip .tdate{font-weight:700;margin-bottom:3px;font-size:11.5px;opacity:.85}
 .ctip .trow{display:flex;align-items:center;gap:5px;white-space:nowrap}
 .ctip .trow i{width:9px;height:9px;border-radius:2px;display:inline-block}
+/* 图表时间区间（全部/年/月/周）+ 横向拖动 */
+.rgbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 12px}
+.rgb{padding:7px 15px;border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;line-height:1.2}
+.rgb:hover{border-color:var(--blue);color:var(--blue)}
+.rgb.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.rgnav{width:32px;height:32px;padding:0;display:flex;align-items:center;justify-content:center;border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:8px;cursor:pointer;font-size:16px;line-height:1}
+.rgnav:hover:not(:disabled){border-color:var(--blue);color:var(--blue)}
+.rgnav:disabled{opacity:.32;cursor:default}
+.rgspan{font-size:12px;color:var(--muted);margin-left:2px}
+.ichart.pannable{cursor:grab;touch-action:pan-y}
+.ichart.pannable.grabbing{cursor:grabbing}
+.ichart.pannable svg{user-select:none;-webkit-user-select:none}
+@media(max-width:768px){
+  .rgb{min-height:44px;padding:0 16px;font-size:15px}
+  .rgnav{width:44px;height:44px;font-size:18px}
+  .rgspan{width:100%;margin-left:0}
+}
 .pietip{position:fixed;background:rgba(22,50,79,.94);color:#fff;border-radius:8px;padding:7px 10px;font-size:12px;pointer-events:none;z-index:999;display:none;box-shadow:0 4px 14px rgba(0,0,0,.25);line-height:1.5}
 .caxisname{position:absolute;top:0;font-size:11px;color:var(--muted);transform:rotate(0deg)}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -229,6 +246,43 @@ const SEED={"ships":[{"id":1,"nation":"JP","name":"（鼠）","isPremium":false,
 let state=null;
 let curView='fleet';
 let CHARTS=[];
+
+/* ---------- 图表时间区间：全部 / 年 / 月 / 周，缺省“全部” ----------
+   每个板块（assets、overview）独立记忆自己的区间与平移量；
+   同一板块内所有曲线图共用同一时间域，切换区间与横向拖动完全同步。
+   off = 从最新一天往回平移的天数（0 = 贴着最新一天）。 */
+const RANGE_WIN={all:0,year:365,month:30,week:7};
+const RANGE_LABEL={all:'全部',year:'年',month:'月',week:'周'};
+const RANGE_KEYS=['all','year','month','week'];
+const RANGE={assets:{mode:'all',off:0},overview:{mode:'all',off:0}};
+function rgState(sec){if(!RANGE[sec])RANGE[sec]={mode:'all',off:0};return RANGE[sec];}
+/* 把当前区间换算成索引窗口 [start,end)，并就地夹紧越界的 off */
+function rgWindow(sec,total){
+  const r=rgState(sec);const win=RANGE_WIN[r.mode]||0;
+  if(!win||win>=total){r.off=0;return {start:0,end:total,win:total,maxOff:0};}
+  const maxOff=total-win;
+  if(!(r.off>=0))r.off=0;
+  if(r.off>maxOff)r.off=maxOff;
+  const end=total-r.off;
+  return {start:end-win,end:end,win:win,maxOff:maxOff};
+}
+function rgApply(sec,dates,seriesArr){
+  const w=rgWindow(sec,dates.length);
+  return {dates:dates.slice(w.start,w.end),series:seriesArr.map(s=>s.slice(w.start,w.end)),w:w};
+}
+function setRange(sec,mode){const r=rgState(sec);if(r.mode===mode)return;r.mode=mode;r.off=0;rerender();}
+function panRange(sec,days){const r=rgState(sec);if(r.mode==='all')return;r.off=r.off+days;rerender();}
+function rangeBar(sec,dates){
+  const r=rgState(sec);const w=rgWindow(sec,dates.length);
+  const btns=RANGE_KEYS.map(m=>'<button class="rgb'+(r.mode===m?' on':'')+'" onclick="setRange(\''+sec+'\',\''+m+'\')">'+RANGE_LABEL[m]+'</button>').join('');
+  const step=Math.max(1,Math.round(w.win/2));
+  const canL=r.mode!=='all'&&r.off<w.maxOff, canR=r.mode!=='all'&&r.off>0;
+  const nav='<button class="rgnav" '+(canL?'':'disabled')+' title="往更早平移" onclick="panRange(\''+sec+'\','+step+')">‹</button>'+
+            '<button class="rgnav" '+(canR?'':'disabled')+' title="往更近平移" onclick="panRange(\''+sec+'\',-'+step+')">›</button>';
+  const from=dates[w.start]||'',to=dates[w.end-1]||'';
+  const tip=r.mode==='all'?'（已显示全部）':'（可按住曲线图横向拖动）';
+  return '<div class="rgbar">'+btns+nav+'<span class="rgspan">'+esc(from)+' ~ '+esc(to)+' · 共 '+w.win+' 天 '+tip+'</span></div>';
+}
 let PIE_TIPS=[];
 
 /* storage: 服务器 /save 目录（不再使用 localStorage） */
@@ -387,7 +441,9 @@ function natCn(code){return NATION_CN[code]||code;}
 function dayKeyOf(x){return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');}
 function resetDayKey(d){d=d||new Date();const x=new Date(d);if(x.getHours()<3){x.setDate(x.getDate()-1);}return dayKeyOf(x);}
 function isFW(s){return state.fwDone && state.fwDone[s.id]===resetDayKey();}
-function toggleFW(id){const k=resetDayKey();if(!state.fwDone)state.fwDone={};if(state.fwDone[id]===k)delete state.fwDone[id];else state.fwDone[id]=k;recordDaily();save();renderFocus();}
+/* 勾选/取消首胜后，只刷新“当前所在视图”，绝不切换板块。
+   旧实现无条件调用 renderFocus()，会把舰队页内容整个换成关注页 → 看起来像莫名跳转。 */
+function toggleFW(id){const k=resetDayKey();if(!state.fwDone)state.fwDone={};if(state.fwDone[id]===k)delete state.fwDone[id];else state.fwDone[id]=k;recordDaily();save();rerender();}
 
 /* 保证 daily 数组末尾就是“当前游戏日”（按凌晨3点分界）。
    若末尾不是当前游戏日（跨天、或多日没打开过页面），则从最后记录日的次日起
@@ -487,10 +543,54 @@ function interactiveChart(series,opts){
       '<line id="hl_'+id+'" y1="'+padT+'" y2="'+(H-padB)+'" stroke="#7a8aa0" stroke-dasharray="3 3"/>'+
       '<g id="dots_'+id+'"></g>'+
     '</g></svg>';
-  CHARTS.push({id:id,series:series,dates:dates,yMin:yMin,yMax:yMax,W:W,padL:padL,padR:padR,n:n,H:H,padT:padT,padB:padB});
-  return '<div class="ichart" id="ichart_'+id+'">'+svg+
+  CHARTS.push({id:id,series:series,dates:dates,yMin:yMin,yMax:yMax,W:W,padL:padL,padR:padR,n:n,H:H,padT:padT,padB:padB,
+               pan:opts.pan||null,panTotal:opts.panTotal||0});
+  return '<div class="ichart'+(opts.pan?' pannable':'')+'" id="ichart_'+id+'">'+svg+
     '<div class="legend">'+leg+'</div>'+
     '<div class="ctip" id="tip_'+id+'" style="display:none"></div></div>';
+}
+/* ---------- 曲线图横向拖动 ----------
+   监听器挂在 document 上：拖动过程中会重绘整个视图（图表元素被替换），
+   若把 mousemove/mouseup 挂在图表元素上，元素一被替换手势就断了。 */
+let PANST=null;
+function chartPanStart(clientX,c,el){
+  if(!c.pan)return;
+  const r=rgState(c.pan);const win=RANGE_WIN[r.mode]||0;
+  if(!win)return;                                  // “全部”区间无可平移空间
+  const svg=el.querySelector('svg');if(!svg)return;
+  const rect=svg.getBoundingClientRect();
+  const plotPx=rect.width*(c.W-c.padL-c.padR)/c.W; // 绘图区实际像素宽
+  const pxPerDay=plotPx/Math.max(1,c.n-1);
+  if(!(pxPerDay>0))return;
+  PANST={sec:c.pan,startX:clientX,startOff:r.off,pxPerDay:pxPerDay,maxOff:Math.max(0,(c.panTotal||0)-win),moved:false};
+  el.classList.add('grabbing');
+  document.addEventListener('mousemove',chartPanMove);
+  document.addEventListener('mouseup',chartPanEnd);
+  document.addEventListener('touchmove',chartPanTouchMove,{passive:false});
+  document.addEventListener('touchend',chartPanEnd);
+  document.addEventListener('touchcancel',chartPanEnd);
+}
+function chartPanTo(clientX){
+  if(!PANST)return;
+  const dx=clientX-PANST.startX;
+  let want=PANST.startOff+Math.round(dx/PANST.pxPerDay); // 向右拖 → 看更早的数据 → off 增大
+  if(want<0)want=0;
+  if(want>PANST.maxOff)want=PANST.maxOff;
+  const r=rgState(PANST.sec);
+  if(want===r.off)return;
+  r.off=want;PANST.moved=true;
+  rerender();
+}
+function chartPanMove(e){chartPanTo(e.clientX);}
+function chartPanTouchMove(e){if(!PANST||e.touches.length!==1)return;e.preventDefault();chartPanTo(e.touches[0].clientX);}
+function chartPanEnd(){
+  PANST=null;
+  const g=document.querySelectorAll('.ichart.grabbing');for(let i=0;i<g.length;i++)g[i].classList.remove('grabbing');
+  document.removeEventListener('mousemove',chartPanMove);
+  document.removeEventListener('mouseup',chartPanEnd);
+  document.removeEventListener('touchmove',chartPanTouchMove);
+  document.removeEventListener('touchend',chartPanEnd);
+  document.removeEventListener('touchcancel',chartPanEnd);
 }
 function bindCharts(){
   CHARTS.forEach(c=>{
@@ -498,7 +598,11 @@ function bindCharts(){
     const svg=el.querySelector('svg');const hov=el.querySelector('#hov_'+c.id);
     const hl=el.querySelector('#hl_'+c.id);const dots=el.querySelector('#dots_'+c.id);
     const tip=el.querySelector('#tip_'+c.id);
-    el.onmousemove=function(e){const r=svg.getBoundingClientRect();
+    if(c.pan){
+      el.onmousedown=function(e){if(e.button!==0)return;e.preventDefault();chartPanStart(e.clientX,c,el);};
+      el.ontouchstart=function(e){if(e.touches.length===1)chartPanStart(e.touches[0].clientX,c,el);};
+    }
+    el.onmousemove=function(e){if(PANST)return;const r=svg.getBoundingClientRect();
       const fx=(e.clientX-r.left)/r.width;
       let i=Math.round((fx*c.W-c.padL)/(c.W-c.padL-c.padR)*(c.n-1));
       if(i<0)i=0;if(i>c.n-1)i=c.n-1;
@@ -650,14 +754,19 @@ function renderAssets(){const d=state.daily;const n=d.dates.length;
     '<div class="stat" style="cursor:pointer" title="点击修改最新总额" onclick="editAsset(\'silver\')"><div class="v" style="color:var(--green)">'+fmtBig(latest('silver'))+'</div><div class="l">银币（最新 · 点击修改）</div></div>'+
     '<div class="stat" style="cursor:pointer" title="点击修改最新总额" onclick="editAsset(\'globalxp\')"><div class="v" style="color:var(--blue)">'+fmtBig(latest('globalxp'))+'</div><div class="l">全局经验（最新 · 点击修改）</div></div>'+
     '</div>';
-  const gT=trimLeading([d.gold],d.dates),sT=trimLeading([d.silver],d.dates),xT=trimLeading([d.globalxp],d.dates);
-  const mkAsset=(title,name,color,trim)=>'<div class="chart-card"><h4>'+title+'（悬浮查看当日数值）</h4>'+
-    interactiveChart([{name:name,color:color,data:downsample(trim.series[0],500)}],{dates:downsample(trim.dates,500),yname:name,h:200,id:'asset_'+name})+
+  // 三条资产曲线共用同一时间域（统一裁掉开头尚未记录的空白期），保证区间切换与拖动完全同步
+  const aT=trimLeading([d.gold,d.silver,d.globalxp],d.dates);
+  const R=rgApply('assets',aT.dates,aT.series);
+  const bar=rangeBar('assets',aT.dates);
+  const rdates=downsample(R.dates,500);
+  const mkAsset=(title,name,color,arr)=>'<div class="chart-card"><h4>'+title+'（悬浮查看当日数值）</h4>'+
+    interactiveChart([{name:name,color:color,data:downsample(arr,500)}],
+      {dates:rdates,yname:name,h:200,id:'asset_'+name,pan:'assets',panTotal:aT.dates.length})+
     '</div>';
-  const chart=mkAsset('金币 · 每日存量','金币','#e0a800',gT)+
-    mkAsset('银币 · 每日存量','银币','#1e9e57',sT)+
-    mkAsset('全局经验 · 每日存量','全局经验','#2e86c1',xT);
-  document.getElementById('view').innerHTML=cards+chart;
+  const chart=mkAsset('金币 · 每日存量','金币','#e0a800',R.series[0])+
+    mkAsset('银币 · 每日存量','银币','#1e9e57',R.series[1])+
+    mkAsset('全局经验 · 每日存量','全局经验','#2e86c1',R.series[2]);
+  document.getElementById('view').innerHTML=cards+bar+chart;
 }
 function downsample(arr,max){if(arr.length<=max)return arr.slice();const step=Math.ceil(arr.length/max);const out=[];for(let i=0;i<arr.length;i+=step)out.push(arr[i]);if(out[out.length-1]!==arr[arr.length-1])out.push(arr[arr.length-1]);return out;}
 /* 资产三种虚拟货币总额：点击手动修改最新一日的值，并计入当日数据统计 */
@@ -679,23 +788,26 @@ function renderOverview(){const d=state.daily;const purchased=state.ships.filter
     '<div class="stat"><div class="v">'+purchased.filter(s=>s.isSuper).length+'</div><div class="l"><span style="color:#000">★</span> 超级舰</div></div>'+
     '</div>';
   const unbuyNote='<div class="sub-note">注：未购买舰船仅显示在「舰队」模块，不计入以上统计。</div>';
-  const shipT=trimLeading([d.shipNeed,d.shipCur,d.shipRem],d.dates);
-  const shipOverlay=interactiveChart([
-    {name:'升级需要',color:'#e67e22',data:downsample(shipT.series[0],500)},
-    {name:'现有经验',color:'#2e86c1',data:downsample(shipT.series[1],500)},
-    {name:'剩余所需',color:'#e0506a',data:downsample(shipT.series[2],500)}
-  ],{dates:downsample(shipT.dates,500),yname:'舰船经验',h:230,id:'ovShip'});
   /* 舰长经验走势：历史 daily 数组(QY14:CMG16) 语义为 cmdCur=升级所需、cmdRem=现有经验、剩余=cmdCur-cmdRem；
      历史之后的数据由 recordDaily 按同一语义写入（cmdCur=升级所需、cmdRem=现有经验），并体现在图表中 */
   const cmdNeedSeries=d.cmdCur;
   const cmdCurSeries=d.cmdRem;
   const cmdRemSeries=d.dates.map((_,i)=>Math.max(0,(d.cmdCur[i]||0)-(d.cmdRem[i]||0)));
-  const cmdT=trimLeading([cmdNeedSeries,cmdCurSeries,cmdRemSeries],d.dates);
+  // 舰船 / 舰长两张走势图共用同一时间域，保证区间切换与拖动同步
+  const ovT=trimLeading([d.shipNeed,d.shipCur,d.shipRem,cmdNeedSeries,cmdCurSeries,cmdRemSeries],d.dates);
+  const R=rgApply('overview',ovT.dates,ovT.series);
+  const ovBar=rangeBar('overview',ovT.dates);
+  const rdates=downsample(R.dates,500);
+  const shipOverlay=interactiveChart([
+    {name:'升级需要',color:'#e67e22',data:downsample(R.series[0],500)},
+    {name:'现有经验',color:'#2e86c1',data:downsample(R.series[1],500)},
+    {name:'剩余所需',color:'#e0506a',data:downsample(R.series[2],500)}
+  ],{dates:rdates,yname:'舰船经验',h:230,id:'ovShip',pan:'overview',panTotal:ovT.dates.length});
   const cmdOverlay=interactiveChart([
-    {name:'升级所需',color:'#e67e22',data:downsample(cmdT.series[0],500)},
-    {name:'现有经验',color:'#8e44ad',data:downsample(cmdT.series[1],500)},
-    {name:'剩余所需',color:'#e0506a',data:downsample(cmdT.series[2],500)}
-  ],{dates:downsample(cmdT.dates,500),yname:'舰长经验',h:230,id:'ovCmd'});
+    {name:'升级所需',color:'#e67e22',data:downsample(R.series[3],500)},
+    {name:'现有经验',color:'#8e44ad',data:downsample(R.series[4],500)},
+    {name:'剩余所需',color:'#e0506a',data:downsample(R.series[5],500)}
+  ],{dates:rdates,yname:'舰长经验',h:230,id:'ovCmd',pan:'overview',panTotal:ovT.dates.length});
   // 系别柱状图（仅已拥有，按系别配色）；条形上方数值由 barSVG 统一呈现
   const natItems=Object.keys(NATION_CN).map(code=>{const c=purchased.filter(s=>s.nation===code).length;return {label:NATION_CN[code],value:c,color:NATION_COL[code].solid};}).filter(i=>i.value>0);
   // 级别柱状图：罗马 I~X + 黑色五角星(超级舰)，共 11 级，按级别升序，排除未购买，异常 level 自动忽略
@@ -707,7 +819,8 @@ function renderOverview(){const d=state.daily;const purchased=state.ships.filter
   const typeItems={};purchased.forEach(s=>{const k=s.typeName||s.type;typeItems[k]=(typeItems[k]||0)+1;});
   const palette=['#2e86c1','#1e9e57','#e0a800','#8e44ad','#e0506a','#16a085','#d35400','#2980b9','#c0392b','#7f8c8d','#27ae60','#8e44ad','#f39c12'];
   const pieItems=Object.keys(typeItems).map((k,i)=>({label:k,value:typeItems[k],color:palette[i%palette.length]}));
-  const charts='<div class="chart-card"><h4>舰船经验走势（所需 / 现有 / 剩余 · 悬浮查看）</h4>'+shipOverlay+'</div>'+
+  const charts=ovBar+
+    '<div class="chart-card"><h4>舰船经验走势（所需 / 现有 / 剩余 · 悬浮查看）</h4>'+shipOverlay+'</div>'+
     '<div class="chart-card"><h4>舰长经验走势（所需 / 现有 / 剩余 · 悬浮查看）</h4>'+cmdOverlay+'</div>'+
     '<div class="chart-card"><h4>各系别已拥有舰船数量</h4>'+barSVG(natItems)+'</div>'+
     '<div class="chart-card"><h4>各等级舰船数量</h4>'+barSVG(lvlBar)+'</div>'+
@@ -1047,9 +1160,16 @@ function render(){try{CHARTS=[];
   const total=state.ships.length;const hint=document.getElementById('bkhint');
   if(total>=30&&hint)hint.textContent='数据已积累 '+total+' 条，建议点「导出 JSON」定期备份。';
 }catch(err){console.error(err);toast('渲染出错（已自动隔离）：'+err.message);}}
+/* 就地重绘当前视图并保持滚动位置：用于勾选首胜、拖动图表等“不该切板块/不该跳顶”的场景 */
+function rerender(){
+  const y=window.pageYOffset||document.documentElement.scrollTop||0;
+  render();
+  window.scrollTo(0,y);
+}
 window.switchView=switchView;window.openShip=openShip;window.openCmd=openCmd;window.closeModal=closeModal;
 window.toggleFW=toggleFW;window.addFollow=addFollow;window.unfollow=unfollow;window.swapCmd=swapCmd;window.recalcShip=recalcShip;
 window.fsFilter=fsFilter;window.fsKey=fsKey;window.fsClear=fsClear;
+window.setRange=setRange;window.panRange=panRange;window.rerender=rerender;
 window.openNewShip=openNewShip;window.saveNewShip=saveNewShip;window.recalcNewShip=recalcNewShip;window.nsCmdModeChange=nsCmdModeChange;
 window.openNewCmd=openNewCmd;window.saveNewCmd=saveNewCmd;window.delCmd=delCmd;
 window.saveShip=saveShip;window.delShip=delShip;window.saveCmd=saveCmd;window.exportJSON=exportJSON;window.importJSON=importJSON;window.clearAll=clearAll;window.editAsset=editAsset;
