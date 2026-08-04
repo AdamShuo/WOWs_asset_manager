@@ -1,0 +1,24 @@
+# 依赖
+node_modules/
+
+# 临时测试脚本（无头测试用，一次性）
+_t_*.js
+_test_*.js
+
+# 日志
+*.log
+npm-debug.log*
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 编辑器
+.vscode/
+.idea/
+
+# 注意：save/ 与 _backups/ 是账号存档数据，刻意纳入版本管理，
+# 便于误改后回滚。若不希望提交数据，取消下面两行注释即可。
+# save/
+# _backups/
