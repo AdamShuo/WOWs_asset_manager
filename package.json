@@ -1,0 +1,13 @@
+{
+  "name": "wows-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "战舰世界资产管理器 —— 零依赖 Node 服务器 + 单文件前端",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
