@@ -286,7 +286,7 @@ function rangeBar(sec,dates){
 let PIE_TIPS=[];
 
 /* storage: 服务器 /save 目录（不再使用 localStorage） */
-let CUR_ACC=null, _saveTimer=null, OFFLINE=false;
+let CUR_ACC=null, _saveTimer=null, OFFLINE=false, OFFLINE_FILES={};
 async function apiGet(u){return fetch(u);}
 async function apiPost(u,body){return fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});}
 
@@ -314,7 +314,7 @@ function recordDaily(){ if(!state||!state.daily)return; const key=resetDayKey();
 }
 
 async function listAccounts(){ if(OFFLINE){ try{ const r=await fetch('./preview-data/manifest.json'); const j=await r.json(); return j.accounts||[]; }catch(e){ return []; } } try{ const r=await apiGet('/api/accounts'); const j=await r.json(); return j.accounts||[]; }catch(e){ return []; } }
-async function loadAccount(name){ if(OFFLINE){ const r=await fetch('./preview-data/'+encodeURIComponent(name)+'.json'); if(r.status===404)return null; if(!r.ok)throw new Error('load '+r.status); return await r.json(); } const r=await fetch('/api/load?account='+encodeURIComponent(name)); if(r.status===404)return null; if(!r.ok)throw new Error('load '+r.status); return await r.json(); }
+async function loadAccount(name){ if(OFFLINE){ const fn=OFFLINE_FILES[name]||(encodeURIComponent(name)+'.json'); const r=await fetch('./preview-data/'+fn); if(r.status===404)return null; if(!r.ok)throw new Error('load '+r.status); return await r.json(); } const r=await fetch('/api/load?account='+encodeURIComponent(name)); if(r.status===404)return null; if(!r.ok)throw new Error('load '+r.status); return await r.json(); }
 async function createAccount(name){ const data=JSON.parse(JSON.stringify(SEED)); data.fwDone={}; const r=await apiPost('/api/save',{account:name,data:data}); if(!r.ok)throw new Error('create failed'); CUR_ACC=name; state=autoRepair(data); pruneFW(); rememberAcc(name); }
 async function renameAccountAPI(oldn,neun){ const r=await apiPost('/api/rename',{old:oldn,neu:neun}); if(!r.ok)throw new Error('rename failed'); }
 async function deleteAccountAPI(name){ const r=await apiPost('/api/delete',{name:name}); if(!r.ok)throw new Error('delete failed'); }
@@ -338,11 +338,12 @@ async function refreshAccSel(){ const sel=document.getElementById('accSel'); if(
 
 async function boot(){
   let reachable=true;
-  try{ const r=await fetch('/api/ping'); if(!r.ok)reachable=false; }catch(e){ reachable=false; }
+  try{ const r=await fetch('/api/ping'); const j=await r.json().catch(()=>null); if(!r.ok||!j||j.ok!==true)reachable=false; }catch(e){ reachable=false; }
   if(!reachable){
     OFFLINE=true;
     let man={accounts:[]};
     try{ man=await (await fetch('./preview-data/manifest.json')).json(); }catch(e){}
+    OFFLINE_FILES=man.files||{};
     const accounts=man.accounts||[];
     if(!accounts.length){ document.getElementById('view').innerHTML='<div class="empty">未检测到服务器，且未找到预览数据。请在本文件所在目录运行 <b>node server.js</b> 后重新部署，或通过 <b>http://localhost:8787</b> 访问。</div>'; document.title='战舰世界 · 资产管理器'; return; }
     let name=lastAcc(); if(!name||accounts.indexOf(name)<0)name=accounts[0];
