@@ -1,0 +1,9 @@
+.git
+.gitignore
+.gitattributes
+node_modules
+save
+_backups
+run.bat
+*.log
+.DS_Store

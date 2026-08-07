@@ -7,7 +7,8 @@ const path = require('path');
 const url = require('url');
 
 const PUBLIC = path.join(__dirname, 'public');
-const SAVE = path.join(__dirname, 'save');
+// 数据目录：默认 ./save；可通过环境变量 SAVE_DIR 指向持久卷（避免临时文件系统重启丢数据）
+const SAVE = process.env.SAVE_DIR ? path.resolve(process.env.SAVE_DIR) : path.join(__dirname, 'save');
 fs.mkdirSync(SAVE, { recursive: true });
 const PORT = process.env.PORT || 8787;
 
@@ -89,6 +90,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ---------- 静态文件 ----------
+    // 预览快照含真实账号数据，禁止在运行时直接访问（仅本地静态沙盒需要）
+    if (p.startsWith('/preview-data')) { res.writeHead(404); return res.end('not found'); }
+
     let rel = p === '/' ? '/index.html' : p;
     let fp = path.normalize(path.join(PUBLIC, rel));
     if (!fp.startsWith(PUBLIC)) { res.writeHead(403); return res.end('forbidden'); }
