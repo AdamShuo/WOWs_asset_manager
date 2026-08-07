@@ -22,3 +22,6 @@ desktop.ini
 # 便于误改后回滚。若不希望提交数据，取消下面两行注释即可。
 # save/
 # _backups/
+
+# 静态预览快照（由 _gen_preview.js 从 save/ 生成，含真实账号数据，不入库）
+public/preview-data/
