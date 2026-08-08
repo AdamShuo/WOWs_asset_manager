@@ -388,7 +388,7 @@ function autoRepair(d){
     return o;
   });
   if(!Array.isArray(d.commanders)||!d.commanders.length)d.commanders=JSON.parse(JSON.stringify(SEED.commanders));
-  // 规范化：Excel 数据中军衔常带“海军精英”后缀，统一剥离（是否精英由技能总数≥21 推导，无需文字展示）
+  // 规范化：Excel 数据中军衔常带“海军精英”后缀，统一剥离（是否精英由技能点总数/级别≥21 推导，无需文字展示）
   d.commanders.forEach(c=>{ if(typeof c.rankTitle==='string'&&c.rankTitle.indexOf('海军精英')>=0)c.rankTitle=c.rankTitle.replace(/海军精英/g,''); });
   const cmdMap={};d.commanders.forEach(c=>cmdMap[c.id]=c);
   d.ships.forEach(s=>{
@@ -1045,8 +1045,8 @@ function openShip(id){const s=findShip(id);if(!s)return;const cmd=findCmd(s.comm
       '<div class="field"><label>更换指挥官</label><select id="mSwap" onchange="swapCmd('+s.id+',this.value)">'+swapOpts+'</select></div>'+
       '<div class="row2"><div class="field"><label>舰长名</label><input id="mcName" value="'+esc(cmd.name)+'"></div><div class="field"><label>类别</label><select id="mcCls"><option value="legendary" '+(cmd.cls==='legendary'?'selected':'')+'>传奇</option><option value="special" '+(cmd.cls==='special'?'selected':'')+'>特殊</option><option value="normal" '+(cmd.cls==='normal'?'selected':'')+'>普通</option></select></div></div>'+
       '<div class="field"><label>军衔</label><input id="mcRank" value="'+esc(cmd.rankTitle)+'"></div>'+
-      '<div class="row2"><div class="field"><label>技能已用</label><input id="mcSU" type="number" value="'+cmd.skillUsed+'"></div><div class="field"><label>技能总数</label><input id="mcST" type="number" value="'+cmd.skillTotal+'"></div></div>'+
-      '<div class="row2"><div class="field"><label>舰长所需经验</label><input id="mcN" type="number" value="'+cmd.xpNeed+'"></div><div class="field"><label>舰长现有经验</label><input id="mcC" type="number" value="'+cmd.xpCur+'"></div></div>'+
+      '<div class="row2"><div class="field"><label>剩余技能点</label><input id="mcSU" type="number" value="'+cmd.skillUsed+'"></div><div class="field"><label>技能点总数/级别</label><input id="mcST" type="number" value="'+cmd.skillTotal+'"></div></div>'+
+      '<div class="row2"><div class="field"><label>升级到下一级所需经验</label><input id="mcN" type="number" value="'+cmd.xpNeed+'"></div><div class="field"><label>舰长现有经验</label><input id="mcC" type="number" value="'+cmd.xpCur+'"></div></div>'+
       '<div class="field" style="color:var(--muted);font-size:12px">'+''+'</div>'
     :'')+
     '<div class="mbtn"><button class="save" onclick="saveShip('+id+')">保存</button><button class="del" onclick="delShip('+id+')">删除</button><button class="cancel" onclick="closeModal()">取消</button></div>';
@@ -1105,8 +1105,8 @@ function openCmd(id){const c=findCmd(id);if(!c)return;const ship=c.shipId?findSh
     shipBlock+
     '<div class="row2"><div class="field"><label>舰长名</label><input id="ccName" value="'+esc(c.name)+'"></div><div class="field"><label>类别</label><select id="ccCls">'+clsOptsHtml(c.cls)+'</select></div></div>'+
     '<div class="field"><label>军衔</label><input id="ccRank" value="'+esc(c.rankTitle)+'"></div>'+
-    '<div class="row2"><div class="field"><label>技能已用</label><input id="ccSU" type="number" value="'+c.skillUsed+'"></div><div class="field"><label>技能总数</label><input id="ccST" type="number" value="'+c.skillTotal+'"></div></div>'+
-    '<div class="row2"><div class="field"><label>所需经验</label><input id="ccN" type="number" value="'+c.xpNeed+'"></div><div class="field"><label>现有经验</label><input id="ccC" type="number" value="'+c.xpCur+'"></div></div>'+
+    '<div class="row2"><div class="field"><label>剩余技能点</label><input id="ccSU" type="number" value="'+c.skillUsed+'"></div><div class="field"><label>技能点总数/级别</label><input id="ccST" type="number" value="'+c.skillTotal+'"></div></div>'+
+    '<div class="row2"><div class="field"><label>升级到下一级所需经验</label><input id="ccN" type="number" value="'+c.xpNeed+'"></div><div class="field"><label>现有经验</label><input id="ccC" type="number" value="'+c.xpCur+'"></div></div>'+
     '<div class="mbtn"><button class="save" onclick="saveCmd('+id+')">保存</button><button class="del" onclick="delCmd('+id+')">删除</button><button class="cancel" onclick="closeModal()">取消</button></div>';
   document.getElementById('modal').classList.add('show');}
 function saveCmd(id){const c=findCmd(id);if(!c)return;
@@ -1149,8 +1149,8 @@ function openNewShip(){
     '<div id="nsNewCmd">'+
       '<div class="row2"><div class="field"><label>舰长名</label><input id="nsCName" placeholder="留空则与舰名同名"></div><div class="field"><label>类别</label><select id="nsCCls">'+clsOptsHtml('normal')+'</select></div></div>'+
       '<div class="field"><label>军衔</label><input id="nsCRank" placeholder="选填，例：上校"></div>'+
-      '<div class="row2"><div class="field"><label>技能已用</label><input id="nsCSU" type="number" value="0"></div><div class="field"><label>技能总数</label><input id="nsCST" type="number" value="0"></div></div>'+
-      '<div class="row2"><div class="field"><label>舰长所需经验</label><input id="nsCN" type="number" value="0"></div><div class="field"><label>舰长现有经验</label><input id="nsCC" type="number" value="0"></div></div>'+
+      '<div class="row2"><div class="field"><label>剩余技能点</label><input id="nsCSU" type="number" value="0"></div><div class="field"><label>技能点总数/级别</label><input id="nsCST" type="number" value="0"></div></div>'+
+      '<div class="row2"><div class="field"><label>升级到下一级所需经验</label><input id="nsCN" type="number" value="0"></div><div class="field"><label>舰长现有经验</label><input id="nsCC" type="number" value="0"></div></div>'+
     '</div>'+
     '<div id="nsResCmdBox" style="display:none"><div class="field"><label>选择预备役舰长</label><select id="nsResCmd">'+resOpt+'</select></div></div>'+
     '<div class="mbtn"><button class="save" onclick="saveNewShip()">添加</button><button class="cancel" onclick="closeModal()">取消</button></div>';
@@ -1221,8 +1221,8 @@ function openNewCmd(){
   document.getElementById('modalBox').innerHTML='<span class="mclose" onclick="closeModal()">×</span><h3>新增舰长</h3>'+
     '<div class="row2"><div class="field"><label>舰长名 *</label><input id="ncName" placeholder="例：山本五十六" autocomplete="off"></div><div class="field"><label>类别</label><select id="ncCls">'+clsOptsHtml('normal')+'</select></div></div>'+
     '<div class="field"><label>军衔</label><input id="ncRank" placeholder="选填，例：上校"></div>'+
-    '<div class="row2"><div class="field"><label>技能已用</label><input id="ncSU" type="number" value="0"></div><div class="field"><label>技能总数</label><input id="ncST" type="number" value="0"></div></div>'+
-    '<div class="row2"><div class="field"><label>所需经验</label><input id="ncN" type="number" value="0"></div><div class="field"><label>现有经验</label><input id="ncC" type="number" value="0"></div></div>'+
+    '<div class="row2"><div class="field"><label>剩余技能点</label><input id="ncSU" type="number" value="0"></div><div class="field"><label>技能点总数/级别</label><input id="ncST" type="number" value="0"></div></div>'+
+    '<div class="row2"><div class="field"><label>升级到下一级所需经验</label><input id="ncN" type="number" value="0"></div><div class="field"><label>现有经验</label><input id="ncC" type="number" value="0"></div></div>'+
     '<div class="field"><label>所属舰船</label><select id="ncShip"><option value="">预备役 · 暂不配舰</option>'+shipPickOpts(0)+'</select>'+
       '<div style="color:var(--muted);font-size:12px;margin-top:4px">选定舰船后，该舰原舰长会自动退回预备役（不会被删除）。</div></div>'+
     '<div class="mbtn"><button class="save" onclick="saveNewCmd()">添加</button><button class="cancel" onclick="closeModal()">取消</button></div>';
