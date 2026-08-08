@@ -18,10 +18,10 @@ desktop.ini
 .vscode/
 .idea/
 
-# 注意：save/ 与 _backups/ 是账号存档数据，刻意纳入版本管理，
-# 便于误改后回滚。若不希望提交数据，取消下面两行注释即可。
-# save/
-# _backups/
+# 账号存档数据：含真实账号信息，不入库（公开仓库避免泄露隐私）。
+# 应用内置 SEED 种子数据，新账号会自动生成示例，无需提交存档。
+save/
+_backups/
 
 # 静态预览快照（由 _gen_preview.js 从 save/ 生成，含真实账号数据，不入库）
 public/preview-data/
