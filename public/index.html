@@ -25,6 +25,13 @@ header .sub{font-size:12px;opacity:.8}
 .btn.sm{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer}
 .btn.sm:hover{background:rgba(255,255,255,.3)}
 .bkhint{width:100%;font-size:12px;color:#ffe9a8;margin-top:4px}
+.storeinfo{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;opacity:.92}
+.storeinfo .lbl{opacity:.85;white-space:nowrap}
+.storeinfo .bar{width:130px;height:8px;border-radius:5px;background:rgba(255,255,255,.22);overflow:hidden}
+.storeinfo .bar>i{display:block;height:100%;width:0;background:#5fdc8a;border-radius:5px;transition:width .35s}
+.storeinfo.warn .bar>i{background:#ffb347}
+.storeinfo.danger .bar>i{background:#ff6b6b}
+.storeinfo .num{font-variant-numeric:tabular-nums;white-space:nowrap}
 nav#tabs{display:flex;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
 nav#tabs button{flex:1;border:none;background:none;padding:12px 6px;font-size:14px;color:var(--muted);cursor:pointer;border-bottom:3px solid transparent;font-weight:600}
 nav#tabs button.active{color:var(--blue);border-bottom-color:var(--blue)}
@@ -206,6 +213,7 @@ main{padding:16px;max-width:1100px;margin:0 auto;padding-bottom:80px}
     <button class="btn sm" onclick="newAccount()">新建</button>
     <button class="btn sm" onclick="renameAccount()">重命名</button>
     <button class="btn sm" onclick="deleteAccount()">删除</button>
+    <span class="storeinfo" id="storeInfo"></span>
   </div>
   <div class="bkhint" id="bkhint"></div>
 </header>
@@ -316,6 +324,24 @@ function lsAccounts(){ try{ const s=lsGet('accounts'); return s?JSON.parse(s):[]
 function lsSetAccounts(a){ lsSet('accounts', JSON.stringify(a)); }
 function lsDataKey(n){ return 'data_'+n; }
 async function localPersist(name,obj){ const ok=lsSet(lsDataKey(name), compressState(obj)); if(!ok)toast('保存失败：本地存储空间不足，建议导出 JSON 备份'); return ok; }
+/* -- 账号行末尾：存储/数据使用量 -- */
+const LS_QUOTA=5*1024*1024; // 浏览器单源 localStorage 典型上限（按字符/字节估算）
+let _lsQuota=LS_QUOTA;
+function _byteLen(s){ try{ return new TextEncoder().encode(s).length; }catch(e){ return (s||'').length; } }
+function _lsUsedBytes(){ let n=0; try{ for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); n+=_byteLen(k)+(localStorage.getItem(k)?_byteLen(localStorage.getItem(k)):0); } }catch(e){} return n; }
+function _fmtMB(b){ return (b/1024/1024).toFixed(2)+' MB'; }
+function updateStoreInfo(){ const el=document.getElementById('storeInfo'); if(!el)return;
+  if(LOCAL){
+    const used=_lsUsedBytes(); const quota=_lsQuota||LS_QUOTA; const pct=Math.min(100, used/quota*100);
+    el.className='storeinfo '+(pct>=90?'danger':(pct>=70?'warn':''));
+    el.innerHTML='<span class="lbl">本地存储</span><span class="bar"><i style="width:'+pct.toFixed(1)+'%"></i></span><span class="num">'+_fmtMB(used)+' / '+_fmtMB(quota)+'</span>';
+  } else {
+    const used=state?_byteLen(JSON.stringify(state)):0; const pct=Math.min(100, used/LS_QUOTA*100);
+    el.className='storeinfo '+(pct>=90?'danger':(pct>=70?'warn':''));
+    el.innerHTML='<span class="lbl">数据</span><span class="bar"><i style="width:'+pct.toFixed(1)+'%"></i></span><span class="num">'+_fmtMB(used)+'</span>';
+  }
+}
+function refreshQuotaEstimate(){ try{ if(navigator.storage&&navigator.storage.estimate){ navigator.storage.estimate().then(e=>{ if(e&&e.quota){ _lsQuota=e.quota; updateStoreInfo(); } }).catch(()=>{}); } }catch(e){} }
 
 
 function save(){ if(!CUR_ACC||!state)return; if(_saveTimer)clearTimeout(_saveTimer); _saveTimer=setTimeout(persist,200); }
@@ -370,6 +396,7 @@ async function boot(){
   try{ const r=await fetch('/api/ping'); const j=await r.json().catch(()=>null); if(!r.ok||!j||j.ok!==true)reachable=false; }catch(e){ reachable=false; }
   if(!reachable){
     LOCAL=true;
+    refreshQuotaEstimate();
     let accounts=lsAccounts();
     if(!accounts.length){
       let seedName='大号-龙没耳', seedData=null;
@@ -1294,6 +1321,7 @@ function render(){try{CHARTS=[];
   // backup hint
   const total=state.ships.length;const hint=document.getElementById('bkhint');
   if(total>=30&&hint)hint.textContent='数据已积累 '+total+' 条，建议点「导出 JSON」定期备份。';
+  updateStoreInfo();
 }catch(err){console.error(err);toast('渲染出错（已自动隔离）：'+err.message);}}
 /* 就地重绘当前视图并保持滚动位置：用于勾选首胜、拖动图表等“不该切板块/不该跳顶”的场景 */
 function rerender(){
