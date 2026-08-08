@@ -701,13 +701,13 @@ function shipCard(s){const cmd=findCmd(s.commanderId);
 /* 搜索输入法(IME)友好：组字过程中不重绘（避免中文输入被打断）；重绘后恢复焦点与光标到末尾 */
 let _searchComposing=false,_searchRefocusId=null;
 function onSearchInput(el,view,e){const st=(view==='fleet'?(state._f=state._f||{}):(state._cf=state._cf||{}));st.q=el.value;
-  // 组字进行中（输入法候选未确认）：只记录关键词、不重绘，避免中文输入被打断
+  // 组字进行中（输入法候选未确认）：只记录关键词、不刷新，避免中文输入被打断
   if(e&&e.isComposing){_searchComposing=true;return;}
-  // 前一轮被标记为组字中，但本次 input 已是 isComposing=false → 组字已结束，渲染并清除标记
+  // 前一轮被标记为组字中，但本次 input 已是 isComposing=false → 组字已结束，刷新列表并清除标记
   // （兼容部分输入法/浏览器不触发 compositionend、仅靠尾部 input 提交的情况，防止标记卡死导致搜索永不刷新）
-  if(_searchComposing){_searchComposing=false;_searchRefocusId=el.id;if(view==='fleet')renderFleet();else renderCommanders();return;}
-  // 普通输入（无输入法）：直接渲染
-  _searchRefocusId=el.id;if(view==='fleet')renderFleet();else renderCommanders();}
+  if(_searchComposing){_searchComposing=false;if(view==='fleet')refreshFleetList();else refreshCmdList();return;}
+  // 普通输入（无输入法）：只刷新列表（不重建搜索框，保持焦点与输入法状态稳定，确保实时过滤）
+  if(view==='fleet')refreshFleetList();else refreshCmdList();}
 function afterSearchRender(){if(_searchRefocusId){const el=document.getElementById(_searchRefocusId);if(el){el.focus();try{el.setSelectionRange(el.value.length,el.value.length);}catch(e){}}_searchRefocusId=null;}}
 function renderFleet(){const f=state._f||{};const q=(f.q||'').toLowerCase();const nat=f.nat||'';const status=f.status||'';
   let ships=state.ships.filter(s=>{
@@ -722,10 +722,11 @@ function renderFleet(){const f=state._f||{};const q=(f.q||'').toLowerCase();cons
   const natOpt='<option value="">全部系别</option>'+Object.keys(NATION_CN).map(code=>'<option value="'+code+'" '+(nat===code?'selected':'')+'>'+NATION_CN[code]+' ('+state.ships.filter(s=>s.nation===code).length+')</option>').join('');
   const statOpt='<option value="">全部状态</option><option value="research" '+(status==='research'?'selected':'')+'>非完全体</option><option value="fully" '+(status==='fully'?'selected':'')+'>完全体</option><option value="notbuy" '+(status==='notbuy'?'selected':'')+'>未购买</option><option value="premium" '+(status==='premium'?'selected':'')+'>金币船</option><option value="spec" '+(status==='spec'?'selected':'')+'>X级特种船</option>';
   let html='<div class="filters"><input type="search" id="fleetSearch" placeholder="搜索舰名 / 类型 / 系别" value="'+esc(f.q||'')+'" oninput="onSearchInput(this,\'fleet\',event)" oncompositionstart="_searchComposing=true" oncompositionend="_searchComposing=false;onSearchInput(this,\'fleet\',event)">'+
-    '<select onchange="state._f=state._f||{};state._f.nat=this.value;renderFleet()">'+natOpt+'</select>'+
-    '<select onchange="state._f=state._f||{};state._f.status=this.value;renderFleet()">'+statOpt+'</select>'+
+    '<select onchange="state._f=state._f||{};state._f.nat=this.value;_searchRefocusId=\'fleetSearch\';renderFleet()">'+natOpt+'</select>'+
+    '<select onchange="state._f=state._f||{};state._f.status=this.value;_searchRefocusId=\'fleetSearch\';renderFleet()">'+statOpt+'</select>'+
     '<button class="addbtn" onclick="openNewShip()">＋ 新增舰船</button></div>';
-  if(!ships.length){html+='<div class="empty">没有匹配的舰艇</div>';document.getElementById('view').innerHTML=html;afterSearchRender();return;}
+  html+='<div id="fleetList">';
+  if(!ships.length){html+='<div class="empty">没有匹配的舰艇</div>';html+='</div>';document.getElementById('view').innerHTML=html;afterSearchRender();return;}
   html+='<div class="natgroups">';
   NATION_ORDER.forEach(n=>{let grp=ships.filter(s=>natCn(s.nation)===n);if(!grp.length)return;
     grp.sort((a,b)=>lvNum(a)-lvNum(b)||(a.seq-b.seq));
@@ -733,8 +734,30 @@ function renderFleet(){const f=state._f||{};const q=(f.q||'').toLowerCase();cons
     html+='<div class="natgroup"><div class="nathead" style="border-left:4px solid '+col.solid+';color:'+col.solid+'">'+n+'<span class="cnt">'+grp.length+' 艘</span></div><div class="grid">';
     grp.forEach(s=>html+=shipCard(s));html+='</div></div>';});
   html+='</div>';
+  html+='</div>';
   document.getElementById('view').innerHTML=html;afterSearchRender();
 }
+function buildFleetList(){const f=state._f||{};const q=(f.q||'').toLowerCase();const nat=f.nat||'';const status=f.status||'';
+  let ships=state.ships.filter(s=>{
+    if(q&&!(s.name.toLowerCase().includes(q)||s.type.toLowerCase().includes(q)||natCn(s.nation).includes(q)))return false;
+    if(nat&&s.nation!==nat)return false;
+    if(status==='research'&&(!s.purchased||!s.shipModule))return false;
+    if(status==='fully'&&!s.fullyUpgraded)return false;
+    if(status==='notbuy'&&s.purchased)return false;
+    if(status==='premium'&&!s.isPremium)return false;
+    if(status==='spec'&&!(s.isPremium&&s.level==='X'))return false;
+    return true;});
+  if(!ships.length)return '<div class="empty">没有匹配的舰艇</div>';
+  let html='<div class="natgroups">';
+  NATION_ORDER.forEach(n=>{let grp=ships.filter(s=>natCn(s.nation)===n);if(!grp.length)return;
+    grp.sort((a,b)=>lvNum(a)-lvNum(b)||(a.seq-b.seq));
+    const code=Object.keys(NATION_CN).find(c=>NATION_CN[c]===n);const col=NATION_COL[code]||{solid:'#888'};
+    html+='<div class="natgroup"><div class="nathead" style="border-left:4px solid '+col.solid+';color:'+col.solid+'">'+n+'<span class="cnt">'+grp.length+' 艘</span></div><div class="grid">';
+    grp.forEach(s=>html+=shipCard(s));html+='</div></div>';});
+  html+='</div>';
+  return html;}
+function refreshFleetList(){const el=document.getElementById('fleetList');if(el)el.innerHTML=buildFleetList();}
+
 /* 舰队卡片拖拽排序：仅允许同系别、同级别之间调整，保持与游戏服务器一致 */
 function onDragStart(e){const el=e.currentTarget;_dragId=+el.getAttribute('data-id');_dragNat=el.getAttribute('data-nat');_dragLv=el.getAttribute('data-lv');el.classList.add('dragging');e.dataTransfer.effectAllowed='move';}
 function onDragOver(e){const el=e.currentTarget;if(_dragId==null)return;const id=+el.getAttribute('data-id');if(id===_dragId)return;if(el.getAttribute('data-nat')===_dragNat&&el.getAttribute('data-lv')===_dragLv){e.preventDefault();el.classList.add('dragover');}}
@@ -760,9 +783,10 @@ function renderCommanders(){const f=state._cf||{};const q=(f.q||'').toLowerCase(
   let nbTotal=0,resTotal=0,ownTotal=0;
   state.commanders.forEach(c=>{const sh=c.shipId?findShip(c.shipId):null;if(!sh)resTotal++;else if(sh.purchased)ownTotal++;else nbTotal++;});
   const ownOpt='<option value="">全部舰长 ('+state.commanders.length+')</option><option value="owned" '+(own==='owned'?'selected':'')+'>在役舰船 ('+ownTotal+')</option><option value="notbuy" '+(own==='notbuy'?'selected':'')+'>未购舰船 ('+nbTotal+')</option><option value="reserve" '+(own==='reserve'?'selected':'')+'>预备役 ('+resTotal+')</option>';
-  let html='<div class="filters"><input type="search" id="cmdSearch" placeholder="搜索舰长名 / 军衔 / 舰船" value="'+esc(f.q||'')+'" oninput="onSearchInput(this,\'cmd\',event)" oncompositionstart="_searchComposing=true" oncompositionend="_searchComposing=false;onSearchInput(this,\'cmd\',event)"><select onchange="state._cf=state._cf||{};state._cf.cls=this.value;renderCommanders()">'+clsOpt+'</select><select onchange="state._cf=state._cf||{};state._cf.own=this.value;renderCommanders()">'+ownOpt+'</select>'+
+  let html='<div class="filters"><input type="search" id="cmdSearch" placeholder="搜索舰长名 / 军衔 / 舰船" value="'+esc(f.q||'')+'" oninput="onSearchInput(this,\'cmd\',event)" oncompositionstart="_searchComposing=true" oncompositionend="_searchComposing=false;onSearchInput(this,\'cmd\',event)"><select onchange="state._cf=state._cf||{};state._cf.cls=this.value;_searchRefocusId=\'cmdSearch\';renderCommanders()">'+clsOpt+'</select><select onchange="state._cf=state._cf||{};state._cf.own=this.value;_searchRefocusId=\'cmdSearch\';renderCommanders()">'+ownOpt+'</select>'+
     '<button class="addbtn" onclick="openNewCmd()">＋ 新增舰长</button></div>';
-  if(!cmds.length){html+='<div class="empty">没有匹配的舰长</div>';document.getElementById('view').innerHTML=html;afterSearchRender();return;}
+  html+='<div id="cmdList">';
+  if(!cmds.length){html+='<div class="empty">没有匹配的舰长</div>';html+='</div>';document.getElementById('view').innerHTML=html;afterSearchRender();return;}
   html+='<div class="grid">';
   cmds.forEach(c=>{const ship=findShip(c.shipId);const isElite=c.skillTotal>=21;
     const nat=ship?ship.nation:null;const col=nat?NATION_COL[nat]:{bg:'#fff',solid:'#ccc'};const bg=nat?natBg(nat):'#fff',fg=nat?natFg(nat):'#1a2433';
@@ -775,8 +799,34 @@ function renderCommanders(){const f=state._cf||{};const q=(f.q||'').toLowerCase(
       '<div class="bar cbar"><i style="width:'+pct(ccur,cneed)+'%"></i></div><div class="barlabel"><span>'+(cdflag?('经验 '+fmt(ccur)+' / '+fmt(cneed)):'经验 '+fmt(ccur))+'</span><span>'+(cdflag?('还需 '+fmt(crem)):'已满级')+'</span></div>'+
       '</div>';});
   html+='</div>';
+  html+='</div>';
   document.getElementById('view').innerHTML=html;afterSearchRender();
 }
+
+function buildCmdList(){const f=state._cf||{};const q=(f.q||'').toLowerCase();const cls=f.cls||'';const own=f.own||'';
+  let cmds=state.commanders.filter(c=>{
+    const ship=c.shipId?findShip(c.shipId):null;
+    if(c.shipId&&!ship)return false;
+    if(own==='owned'&&!(ship&&ship.purchased))return false;
+    if(own==='notbuy'&&!(ship&&!ship.purchased))return false;
+    if(own==='reserve'&&ship)return false;
+    if(q){const hay=[c.name,c.rankTitle||'',ship?ship.name:'预备役'].join(' ').toLowerCase();if(!hay.includes(q))return false;}
+    if(cls&&c.cls!==cls)return false;return true;});
+  if(!cmds.length)return '<div class="empty">没有匹配的舰长</div>';
+  let html='<div class="grid">';
+  cmds.forEach(c=>{const ship=findShip(c.shipId);const isElite=c.skillTotal>=21;
+    const nat=ship?ship.nation:null;const col=nat?NATION_COL[nat]:{bg:'#fff',solid:'#ccc'};const bg=nat?natBg(nat):'#fff',fg=nat?natFg(nat):'#1a2433';
+    const cneed=c.xpNeed,ccur=c.xpCur,crem=c.xpRem;const cdflag=cneed>0;
+    html+='<div class="card" onclick="openCmd('+c.id+')" style="background:'+bg+';color:'+fg+';border-left:4px solid '+col.solid+'">'+
+      '<div class="top"><div class="sname"><span class="cbadge '+c.cls+'">'+(c.cls==='legendary'?'传奇':c.cls==='special'?'特殊':'普通')+'</span> '+esc(c.name)+'</div></div>'+
+      '<div class="mod">所在舰船：'+(ship?esc(ship.name)+(ship.purchased?'':' <span class="nbtag">未购舰</span>'):'<span class="nbtag">预备役 · 未配舰</span>')+'</div>'+
+      '<div class="mod">军衔：'+esc(c.rankTitle||'—')+'</div>'+
+      '<div class="mod">技能：'+c.skillUsed+'/'+c.skillTotal+'</div>'+
+      '<div class="bar cbar"><i style="width:'+pct(ccur,cneed)+'%"></i></div><div class="barlabel"><span>'+(cdflag?('经验 '+fmt(ccur)+' / '+fmt(cneed)):'经验 '+fmt(ccur))+'</span><span>'+(cdflag?('还需 '+fmt(crem)):'已满级')+'</span></div>'+
+      '</div>';});
+  html+='</div>';
+  return html;}
+function refreshCmdList(){const el=document.getElementById('cmdList');if(el)el.innerHTML=buildCmdList();}
 
 /* ---------- assets (req4: interactive, hover axis) ---------- */
 function renderAssets(){const d=state.daily;const n=d.dates.length;
