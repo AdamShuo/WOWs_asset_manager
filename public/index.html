@@ -392,7 +392,11 @@ function autoRepair(d){
   d.commanders.forEach(c=>{ if(typeof c.rankTitle==='string'&&c.rankTitle.indexOf('海军精英')>=0)c.rankTitle=c.rankTitle.replace(/海军精英/g,''); });
   const cmdMap={};d.commanders.forEach(c=>cmdMap[c.id]=c);
   d.ships.forEach(s=>{
-    if(!cmdMap[s.commanderId]){
+    // 仅当该舰确实“配属了某舰长(id>0)”但舰长数据缺失时才重建（修复损坏数据）；
+    // commanderId===0 / null / undefined 表示“无舰长”，绝不能据此凭空造一个新舰长。
+    // 否则删除已配属舰长后，舰船.commanderId 被清空为 0，下次刷新 autoRepair 会误判为缺失、
+    // 从种子数据复活一个一模一样的新舰长（表现为“删不掉 / 删了又生成”）。
+    if(s.commanderId && !cmdMap[s.commanderId]){
       const sc=seedCmd[s.id];
       if(sc&&!cmdMap[sc.id]){d.commanders.push(JSON.parse(JSON.stringify(sc)));cmdMap[sc.id]=sc;s.commanderId=sc.id;}
       else{s.commanderId=s.id;if(!cmdMap[s.id]){const ns=d.ships.find(x=>x.id===s.id)||{};const nc={id:s.id,shipId:s.id,name:ns.name||'指挥官',cls:'normal',rankTitle:'',skillUsed:0,skillTotal:0,xpNeed:0,xpCur:0,xpRem:0};d.commanders.push(nc);cmdMap[s.id]=nc;}}
