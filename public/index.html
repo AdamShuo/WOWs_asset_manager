@@ -700,7 +700,14 @@ function shipCard(s){const cmd=findCmd(s.commanderId);
 }
 /* 搜索输入法(IME)友好：组字过程中不重绘（避免中文输入被打断）；重绘后恢复焦点与光标到末尾 */
 let _searchComposing=false,_searchRefocusId=null;
-function onSearchInput(el,view,e){const st=(view==='fleet'?(state._f=state._f||{}):(state._cf=state._cf||{}));st.q=el.value;if(_searchComposing||(e&&e.isComposing))return;_searchRefocusId=el.id;if(view==='fleet')renderFleet();else renderCommanders();}
+function onSearchInput(el,view,e){const st=(view==='fleet'?(state._f=state._f||{}):(state._cf=state._cf||{}));st.q=el.value;
+  // 组字进行中（输入法候选未确认）：只记录关键词、不重绘，避免中文输入被打断
+  if(e&&e.isComposing){_searchComposing=true;return;}
+  // 前一轮被标记为组字中，但本次 input 已是 isComposing=false → 组字已结束，渲染并清除标记
+  // （兼容部分输入法/浏览器不触发 compositionend、仅靠尾部 input 提交的情况，防止标记卡死导致搜索永不刷新）
+  if(_searchComposing){_searchComposing=false;_searchRefocusId=el.id;if(view==='fleet')renderFleet();else renderCommanders();return;}
+  // 普通输入（无输入法）：直接渲染
+  _searchRefocusId=el.id;if(view==='fleet')renderFleet();else renderCommanders();}
 function afterSearchRender(){if(_searchRefocusId){const el=document.getElementById(_searchRefocusId);if(el){el.focus();try{el.setSelectionRange(el.value.length,el.value.length);}catch(e){}}_searchRefocusId=null;}}
 function renderFleet(){const f=state._f||{};const q=(f.q||'').toLowerCase();const nat=f.nat||'';const status=f.status||'';
   let ships=state.ships.filter(s=>{
@@ -1046,7 +1053,7 @@ function openCmd(id){const c=findCmd(id);if(!c)return;const ship=c.shipId?findSh
     '<div class="field"><label>军衔</label><input id="ccRank" value="'+esc(c.rankTitle)+'"></div>'+
     '<div class="row2"><div class="field"><label>技能已用</label><input id="ccSU" type="number" value="'+c.skillUsed+'"></div><div class="field"><label>技能总数</label><input id="ccST" type="number" value="'+c.skillTotal+'"></div></div>'+
     '<div class="row2"><div class="field"><label>所需经验</label><input id="ccN" type="number" value="'+c.xpNeed+'"></div><div class="field"><label>现有经验</label><input id="ccC" type="number" value="'+c.xpCur+'"></div></div>'+
-    '<div class="mbtn"><button class="save" onclick="saveCmd('+id+')">保存</button>'+(ship?'':'<button class="del" onclick="delCmd('+id+')">删除</button>')+'<button class="cancel" onclick="closeModal()">取消</button></div>';
+    '<div class="mbtn"><button class="save" onclick="saveCmd('+id+')">保存</button><button class="del" onclick="delCmd('+id+')">删除</button><button class="cancel" onclick="closeModal()">取消</button></div>';
   document.getElementById('modal').classList.add('show');}
 function saveCmd(id){const c=findCmd(id);if(!c)return;
   c.name=(document.getElementById('ccName').value||'').trim()||c.name;
@@ -1060,10 +1067,12 @@ function saveCmd(id){const c=findCmd(id);if(!c)return;
   const sh=c.shipId?findShip(c.shipId):null;if(sh)syncShipCmd(sh,c);
   recordDaily();save();closeModal();render();toast('已保存'+moved);}
 function delCmd(id){const c=findCmd(id);if(!c)return;
-  if(c.shipId&&findShip(c.shipId)){toast('该舰长在役，请先到舰船详情页更换指挥官');return;}
-  if(!confirm('确定删除预备役舰长「'+c.name+'」？其经验将从统计中移除。'))return;
+  const sh=c.shipId?findShip(c.shipId):null;
+  const warn=sh?('（舰船「'+sh.name+'」将解除配属、回到无舰长状态）'):'';
+  if(!confirm('确定删除舰长「'+c.name+'」？其经验将从统计中移除。'+warn))return;
+  if(sh)clearShipCmd(sh);   // 同步清空舰船上冗余的舰长字段，保持「一舰一舰长」不变式
   const i=state.commanders.findIndex(x=>x.id===id);if(i>=0)state.commanders.splice(i,1);
-  recordDaily();save();closeModal();render();toast('已删除舰长');}
+  recordDaily();save();closeModal();render();toast('已删除舰长'+(sh?('，'+sh.name+' 已解除配属'):''));}
 
 /* ---------- 新增舰船（可同时新建舰长） ---------- */
 function openNewShip(){
