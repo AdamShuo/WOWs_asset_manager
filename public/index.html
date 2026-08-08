@@ -700,7 +700,7 @@ function shipCard(s){const cmd=findCmd(s.commanderId);
 }
 /* 搜索输入法(IME)友好：组字过程中不重绘（避免中文输入被打断）；重绘后恢复焦点与光标到末尾 */
 let _searchComposing=false,_searchRefocusId=null;
-function onSearchInput(el,view){const st=(view==='fleet'?(state._f=state._f||{}):(state._cf=state._cf||{}));st.q=el.value;if(_searchComposing)return;_searchRefocusId=el.id;if(view==='fleet')renderFleet();else renderCommanders();}
+function onSearchInput(el,view,e){const st=(view==='fleet'?(state._f=state._f||{}):(state._cf=state._cf||{}));st.q=el.value;if(_searchComposing||(e&&e.isComposing))return;_searchRefocusId=el.id;if(view==='fleet')renderFleet();else renderCommanders();}
 function afterSearchRender(){if(_searchRefocusId){const el=document.getElementById(_searchRefocusId);if(el){el.focus();try{el.setSelectionRange(el.value.length,el.value.length);}catch(e){}}_searchRefocusId=null;}}
 function renderFleet(){const f=state._f||{};const q=(f.q||'').toLowerCase();const nat=f.nat||'';const status=f.status||'';
   let ships=state.ships.filter(s=>{
@@ -714,7 +714,7 @@ function renderFleet(){const f=state._f||{};const q=(f.q||'').toLowerCase();cons
     return true;});
   const natOpt='<option value="">全部系别</option>'+Object.keys(NATION_CN).map(code=>'<option value="'+code+'" '+(nat===code?'selected':'')+'>'+NATION_CN[code]+' ('+state.ships.filter(s=>s.nation===code).length+')</option>').join('');
   const statOpt='<option value="">全部状态</option><option value="research" '+(status==='research'?'selected':'')+'>非完全体</option><option value="fully" '+(status==='fully'?'selected':'')+'>完全体</option><option value="notbuy" '+(status==='notbuy'?'selected':'')+'>未购买</option><option value="premium" '+(status==='premium'?'selected':'')+'>金币船</option><option value="spec" '+(status==='spec'?'selected':'')+'>X级特种船</option>';
-  let html='<div class="filters"><input type="search" id="fleetSearch" placeholder="搜索舰名 / 类型 / 系别" value="'+esc(f.q||'')+'" oninput="onSearchInput(this,\'fleet\')" oncompositionstart="_searchComposing=true" oncompositionend="_searchComposing=false;onSearchInput(this,\'fleet\')">'+
+  let html='<div class="filters"><input type="search" id="fleetSearch" placeholder="搜索舰名 / 类型 / 系别" value="'+esc(f.q||'')+'" oninput="onSearchInput(this,\'fleet\',event)" oncompositionstart="_searchComposing=true" oncompositionend="_searchComposing=false;onSearchInput(this,\'fleet\',event)">'+
     '<select onchange="state._f=state._f||{};state._f.nat=this.value;renderFleet()">'+natOpt+'</select>'+
     '<select onchange="state._f=state._f||{};state._f.status=this.value;renderFleet()">'+statOpt+'</select>'+
     '<button class="addbtn" onclick="openNewShip()">＋ 新增舰船</button></div>';
@@ -753,7 +753,7 @@ function renderCommanders(){const f=state._cf||{};const q=(f.q||'').toLowerCase(
   let nbTotal=0,resTotal=0,ownTotal=0;
   state.commanders.forEach(c=>{const sh=c.shipId?findShip(c.shipId):null;if(!sh)resTotal++;else if(sh.purchased)ownTotal++;else nbTotal++;});
   const ownOpt='<option value="">全部舰长 ('+state.commanders.length+')</option><option value="owned" '+(own==='owned'?'selected':'')+'>在役舰船 ('+ownTotal+')</option><option value="notbuy" '+(own==='notbuy'?'selected':'')+'>未购舰船 ('+nbTotal+')</option><option value="reserve" '+(own==='reserve'?'selected':'')+'>预备役 ('+resTotal+')</option>';
-  let html='<div class="filters"><input type="search" id="cmdSearch" placeholder="搜索舰长名 / 军衔 / 舰船" value="'+esc(f.q||'')+'" oninput="onSearchInput(this,\'cmd\')" oncompositionstart="_searchComposing=true" oncompositionend="_searchComposing=false;onSearchInput(this,\'cmd\')"><select onchange="state._cf=state._cf||{};state._cf.cls=this.value;renderCommanders()">'+clsOpt+'</select><select onchange="state._cf=state._cf||{};state._cf.own=this.value;renderCommanders()">'+ownOpt+'</select>'+
+  let html='<div class="filters"><input type="search" id="cmdSearch" placeholder="搜索舰长名 / 军衔 / 舰船" value="'+esc(f.q||'')+'" oninput="onSearchInput(this,\'cmd\',event)" oncompositionstart="_searchComposing=true" oncompositionend="_searchComposing=false;onSearchInput(this,\'cmd\',event)"><select onchange="state._cf=state._cf||{};state._cf.cls=this.value;renderCommanders()">'+clsOpt+'</select><select onchange="state._cf=state._cf||{};state._cf.own=this.value;renderCommanders()">'+ownOpt+'</select>'+
     '<button class="addbtn" onclick="openNewCmd()">＋ 新增舰长</button></div>';
   if(!cmds.length){html+='<div class="empty">没有匹配的舰长</div>';document.getElementById('view').innerHTML=html;afterSearchRender();return;}
   html+='<div class="grid">';
