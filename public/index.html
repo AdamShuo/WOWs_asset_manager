@@ -285,13 +285,38 @@ function rangeBar(sec,dates){
 }
 let PIE_TIPS=[];
 
-/* storage: 服务器 /save 目录（不再使用 localStorage） */
-let CUR_ACC=null, _saveTimer=null, OFFLINE=false, OFFLINE_FILES={};
+/* storage: 服务器 /save 目录；无服务器时回退到 localStorage（数据经 LZW 压缩，见下方 LOCAL 后端） */
+let CUR_ACC=null, _saveTimer=null, OFFLINE=false, LOCAL=false, OFFLINE_FILES={};
 async function apiGet(u){return fetch(u);}
 async function apiPost(u,body){return fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});}
 
+/* ===== 本地存储后端（LOCAL）：无服务器时使用，数据经 LZW+Base64 压缩以节省 localStorage 空间 ===== */
+function _getLS(){ if(_getLS._c!==undefined)return _getLS._c; let ls; try{ const k='__wows_t'; localStorage.setItem(k,'1'); localStorage.removeItem(k); ls=localStorage; }catch(e){ ls={_m:{},getItem(k){return Object.prototype.hasOwnProperty.call(this._m,k)?this._m[k]:null;},setItem(k,v){this._m[k]=String(v);},removeItem(k){delete this._m[k];}}; } _getLS._c=ls; return ls; }
+const LS_PFX='wows_v1_';
+function _lsKey(k){return LS_PFX+k;}
+function lsGet(k){ try{ return _getLS().getItem(_lsKey(k)); }catch(e){ return null; } }
+function lsSet(k,v){ try{ _getLS().setItem(_lsKey(k),v); return true; }catch(e){ return false; } }
+function lsDel(k){ try{ _getLS().removeItem(_lsKey(k)); }catch(e){} }
+/* -- LZW 压缩（字节流 → 16 位码 → Base64），无外部依赖，浏览器/Node 内置 API 即可 -- */
+function _utf8Bytes(str){ return new TextEncoder().encode(str); }
+function _bytesUtf8(b){ return new TextDecoder().decode(b); }
+function _b64Enc(bytes){ let s=''; const CH=0x8000; for(let i=0;i<bytes.length;i+=CH){ s+=String.fromCharCode.apply(null, bytes.subarray(i,i+CH)); } return btoa(s); }
+function _b64Dec(b64){ const s=atob(b64); const o=new Uint8Array(s.length); for(let i=0;i<s.length;i++)o[i]=s.charCodeAt(i); return o; }
+function _lzwEnc(bytes){ if(!bytes.length)return []; const dict=new Map(); let n=256; for(let i=0;i<256;i++)dict.set(String.fromCharCode(i),i); let w=String.fromCharCode(bytes[0]); const out=[]; for(let i=1;i<bytes.length;i++){ const c=String.fromCharCode(bytes[i]); const wc=w+c; if(dict.has(wc)){ w=wc; } else { out.push(dict.get(w)); if(n<65535)dict.set(wc,n++); w=c; } } out.push(dict.get(w)); return out; }
+function _lzwDec(codes){ if(!codes.length)return new Uint8Array(0); const dict=[]; for(let i=0;i<256;i++)dict[i]=String.fromCharCode(i); let n=256; let w=dict[codes[0]]!==undefined?dict[codes[0]]:''; let res=w; for(let i=1;i<codes.length;i++){ const k=codes[i]; let ent; if(dict[k]!==undefined)ent=dict[k]; else if(k===n&&w)ent=w+w.charAt(0); else return null; res+=ent; if(n<65535)dict[n++]=w+ent.charAt(0); w=ent; } const o=new Uint8Array(res.length); for(let i=0;i<res.length;i++)o[i]=res.charCodeAt(i); return o; }
+function _codesToBytes(codes){ const o=new Uint8Array(codes.length*2); for(let i=0;i<codes.length;i++){ o[i*2]=codes[i]>>8; o[i*2+1]=codes[i]&255; } return o; }
+function _bytesToCodes(b){ const o=new Array(b.length>>1); for(let i=0;i<o.length;i++){ o[i]=(b[i*2]<<8)|b[i*2+1]; } return o; }
+function compressState(obj){ const bytes=_utf8Bytes(JSON.stringify(obj)); return 'LZ1:'+_b64Enc(_codesToBytes(_lzwEnc(bytes))); }
+function decompressState(str){ if(!str)return null; if(str.indexOf('LZ1:')!==0)return JSON.parse(str); const body=str.slice(4); if(!body)return {}; const bytes=_b64Dec(body); const dec=_lzwDec(_bytesToCodes(bytes)); if(!dec)throw new Error('解压失败'); return JSON.parse(_bytesUtf8(dec)); }
+/* -- 本地账号管理 -- */
+function lsAccounts(){ try{ const s=lsGet('accounts'); return s?JSON.parse(s):[]; }catch(e){ return []; } }
+function lsSetAccounts(a){ lsSet('accounts', JSON.stringify(a)); }
+function lsDataKey(n){ return 'data_'+n; }
+async function localPersist(name,obj){ const ok=lsSet(lsDataKey(name), compressState(obj)); if(!ok)toast('保存失败：本地存储空间不足，建议导出 JSON 备份'); return ok; }
+
+
 function save(){ if(!CUR_ACC||!state)return; if(_saveTimer)clearTimeout(_saveTimer); _saveTimer=setTimeout(persist,200); }
-async function persist(){ if(!CUR_ACC||!state)return; if(OFFLINE){ if(!persist._warned){persist._warned=true;toast('预览模式：更改仅保留在本次会话，不会保存');} return; } try{ const r=await apiPost('/api/save',{account:CUR_ACC,data:state}); if(!r.ok)toast('保存失败（服务器）'); }catch(e){ toast('保存失败：无法连接服务器'); } }
+async function persist(){ if(!CUR_ACC||!state)return; if(LOCAL){ await localPersist(CUR_ACC,state); return; } if(OFFLINE){ if(!persist._warned){persist._warned=true;toast('预览模式：更改仅保留在本次会话，不会保存');} return; } try{ const r=await apiPost('/api/save',{account:CUR_ACC,data:state}); if(!r.ok)toast('保存失败（服务器）'); }catch(e){ toast('保存失败：无法连接服务器'); } }
 /* 数据修改统计：按“凌晨3点”分界把修改计入当日或前一日（与首胜规则一致），并体现在图表中 */
 function recordDaily(){ if(!state||!state.daily)return; const key=resetDayKey(); ensureTodayDaily(); const d=state.daily;
   // 统计口径必须与历史表(Excel 大号页)完全一致：全量统计，不按 purchased 过滤。
@@ -313,14 +338,14 @@ function recordDaily(){ if(!state||!state.daily)return; const key=resetDayKey();
   else { d.dates.push(key); keys.forEach((k,i)=>{ d[k].push(vals[i]); }); }
 }
 
-async function listAccounts(){ if(OFFLINE){ try{ const r=await fetch('./preview-data/manifest.json'); const j=await r.json(); return j.accounts||[]; }catch(e){ return []; } } try{ const r=await apiGet('/api/accounts'); const j=await r.json(); return j.accounts||[]; }catch(e){ return []; } }
-async function loadAccount(name){ if(OFFLINE){ const fn=OFFLINE_FILES[name]||(encodeURIComponent(name)+'.json'); const r=await fetch('./preview-data/'+fn); if(r.status===404)return null; if(!r.ok)throw new Error('load '+r.status); return await r.json(); } const r=await fetch('/api/load?account='+encodeURIComponent(name)); if(r.status===404)return null; if(!r.ok)throw new Error('load '+r.status); return await r.json(); }
-async function createAccount(name){ const data=JSON.parse(JSON.stringify(SEED)); data.fwDone={}; const r=await apiPost('/api/save',{account:name,data:data}); if(!r.ok)throw new Error('create failed'); CUR_ACC=name; state=autoRepair(data); pruneFW(); rememberAcc(name); }
-async function renameAccountAPI(oldn,neun){ const r=await apiPost('/api/rename',{old:oldn,neu:neun}); if(!r.ok)throw new Error('rename failed'); }
-async function deleteAccountAPI(name){ const r=await apiPost('/api/delete',{name:name}); if(!r.ok)throw new Error('delete failed'); }
+async function listAccounts(){ if(LOCAL)return lsAccounts(); if(OFFLINE){ try{ const r=await fetch('./preview-data/manifest.json'); const j=await r.json(); return j.accounts||[]; }catch(e){ return []; } } try{ const r=await apiGet('/api/accounts'); const j=await r.json(); return j.accounts||[]; }catch(e){ return []; } }
+async function loadAccount(name){ if(LOCAL){ const raw=lsGet(lsDataKey(name)); return raw?decompressState(raw):null; } if(OFFLINE){ const fn=OFFLINE_FILES[name]||(encodeURIComponent(name)+'.json'); const r=await fetch('./preview-data/'+fn); if(r.status===404)return null; if(!r.ok)throw new Error('load '+r.status); return await r.json(); } const r=await fetch('/api/load?account='+encodeURIComponent(name)); if(r.status===404)return null; if(!r.ok)throw new Error('load '+r.status); return await r.json(); }
+async function createAccount(name){ if(LOCAL){ const data=JSON.parse(JSON.stringify(SEED)); data.fwDone={}; CUR_ACC=name; state=autoRepair(data); pruneFW(); rememberAcc(name); const a=lsAccounts(); if(a.indexOf(name)<0)a.push(name); lsSetAccounts(a); await localPersist(name,state); return; } const data=JSON.parse(JSON.stringify(SEED)); data.fwDone={}; const r=await apiPost('/api/save',{account:name,data:data}); if(!r.ok)throw new Error('create failed'); CUR_ACC=name; state=autoRepair(data); pruneFW(); rememberAcc(name); }
+async function renameAccountAPI(oldn,neun){ if(LOCAL){ const raw=lsGet(lsDataKey(oldn)); if(raw!==null)lsSet(lsDataKey(neun),raw); lsDel(lsDataKey(oldn)); const a=lsAccounts(); const i=a.indexOf(oldn); if(i>=0)a[i]=neun; lsSetAccounts(a); return; } const r=await apiPost('/api/rename',{old:oldn,neu:neun}); if(!r.ok)throw new Error('rename failed'); }
+async function deleteAccountAPI(name){ if(LOCAL){ lsDel(lsDataKey(name)); lsSetAccounts(lsAccounts().filter(x=>x!==name)); return; } const r=await apiPost('/api/delete',{name:name}); if(!r.ok)throw new Error('delete failed'); }
 
-function rememberAcc(name){ try{ document.cookie='wows_acc='+encodeURIComponent(name)+';path=/;max-age=31536000'; }catch(e){} }
-function lastAcc(){ try{ const m=document.cookie.match(/wows_acc=([^;]+)/); return m?decodeURIComponent(m[1]):null; }catch(e){ return null; } }
+function rememberAcc(name){ try{ document.cookie='wows_acc='+encodeURIComponent(name)+';path=/;max-age=31536000'; }catch(e){} try{ lsSet('cur',name); }catch(e){} }
+function lastAcc(){ try{ const m=document.cookie.match(/wows_acc=([^;]+)/); if(m)return decodeURIComponent(m[1]); }catch(e){} try{ const c=lsGet('cur'); if(c)return c; }catch(e){} return null; }
 
 /* 首胜：国服规则，每天凌晨3点重置；加载时清除过期首胜记录 */
 function pruneFW(){ if(!state||!state.fwDone)return; const k=resetDayKey(); Object.keys(state.fwDone).forEach(id=>{ if(state.fwDone[id]!==k) delete state.fwDone[id]; }); }
@@ -331,27 +356,31 @@ async function clearAll(){if(!confirm('确定清空当前账号「'+(CUR_ACC||''
 
 /* 账号管理 */
 async function switchAccount(name){ if(name===CUR_ACC)return; const data=await loadAccount(name); if(data==null){toast('账号数据缺失');return;} CUR_ACC=name; state=autoRepair(data); pruneFW(); rememberAcc(name); _lastDayKey=null; catchUpDaily(); save(); render(); toast('已切换到「'+name+'」'); }
-async function newAccount(){ if(OFFLINE){toast('预览模式不支持账号管理');return;} const name=prompt('请输入新账号名称：'); if(!name)return; name=name.trim(); if(!name){toast('名称不能为空');return;} const accounts=await listAccounts(); if(accounts.indexOf(name)>=0){toast('账号已存在');return;} try{ await createAccount(name); }catch(e){ toast('创建失败：'+(e.message||'')); return; } await refreshAccSel(); render(); toast('已创建并切换到「'+name+'」'); }
-async function renameAccount(){ if(OFFLINE){toast('预览模式不支持账号管理');return;} if(!CUR_ACC)return; const neu=prompt('重命名当前账号「'+CUR_ACC+'」为：',CUR_ACC); if(!neu)return; neu=neu.trim(); if(!neu||neu===CUR_ACC){return;} try{ await renameAccountAPI(CUR_ACC,neu); CUR_ACC=neu; rememberAcc(neu); await refreshAccSel(); toast('已重命名为「'+neu+'」'); }catch(e){ toast('重命名失败'); } }
-async function deleteAccount(){ if(OFFLINE){toast('预览模式不支持账号管理');return;} if(!CUR_ACC)return; if(!confirm('确定删除账号「'+CUR_ACC+'」？该账号全部数据将永久删除！'))return; try{ await deleteAccountAPI(CUR_ACC); const accounts=await listAccounts(); if(accounts.length){ await switchAccount(accounts[0]); } else { CUR_ACC=null; state=JSON.parse(JSON.stringify(SEED)); } await refreshAccSel(); render(); toast('已删除账号'); }catch(e){ toast('删除失败'); } }
+async function newAccount(){ const name=prompt('请输入新账号名称：'); if(!name)return; name=name.trim(); if(!name){toast('名称不能为空');return;} const accounts=await listAccounts(); if(accounts.indexOf(name)>=0){toast('账号已存在');return;} try{ await createAccount(name); }catch(e){ toast('创建失败：'+(e.message||'')); return; } await refreshAccSel(); render(); toast('已创建并切换到「'+name+'」'); }
+async function renameAccount(){ if(!CUR_ACC)return; const neu=prompt('重命名当前账号「'+CUR_ACC+'」为：',CUR_ACC); if(!neu)return; neu=neu.trim(); if(!neu||neu===CUR_ACC){return;} try{ await renameAccountAPI(CUR_ACC,neu); CUR_ACC=neu; rememberAcc(neu); await refreshAccSel(); toast('已重命名为「'+neu+'」'); }catch(e){ toast('重命名失败'); } }
+async function deleteAccount(){ if(!CUR_ACC)return; if(!confirm('确定删除账号「'+CUR_ACC+'」？该账号全部数据将永久删除！'))return; try{ await deleteAccountAPI(CUR_ACC); const accounts=await listAccounts(); if(accounts.length){ await switchAccount(accounts[0]); } else { CUR_ACC=null; state=JSON.parse(JSON.stringify(SEED)); } await refreshAccSel(); render(); toast('已删除账号'); }catch(e){ toast('删除失败'); } }
 async function refreshAccSel(){ const sel=document.getElementById('accSel'); if(!sel)return; const accounts=await listAccounts(); sel.innerHTML=accounts.map(a=>'<option value="'+esc(a)+'" '+(a===CUR_ACC?'selected':'')+'>'+esc(a)+'</option>').join(''); }
 
 async function boot(){
   let reachable=true;
   try{ const r=await fetch('/api/ping'); const j=await r.json().catch(()=>null); if(!r.ok||!j||j.ok!==true)reachable=false; }catch(e){ reachable=false; }
   if(!reachable){
-    OFFLINE=true;
-    let man={accounts:[]};
-    try{ man=await (await fetch('./preview-data/manifest.json')).json(); }catch(e){}
-    OFFLINE_FILES=man.files||{};
-    const accounts=man.accounts||[];
-    if(!accounts.length){ document.getElementById('view').innerHTML='<div class="empty">未检测到服务器，且未找到预览数据。请在本文件所在目录运行 <b>node server.js</b> 后重新部署，或通过 <b>http://localhost:8787</b> 访问。</div>'; document.title='战舰世界 · 资产管理器'; return; }
+    LOCAL=true;
+    let accounts=lsAccounts();
+    if(!accounts.length){
+      let seedName='大号-龙没耳', seedData=null;
+      try{ const man=await (await fetch('./preview-data/manifest.json')).json(); if(man&&man.accounts&&man.accounts.length){ const fn=(man.files&&man.files[man.accounts[0]])||(encodeURIComponent(man.accounts[0])+'.json'); const r=await fetch('./preview-data/'+fn); if(r.ok){ seedData=await r.json(); seedName=man.accounts[0]; } } }catch(e){}
+      if(!seedData){ seedData=JSON.parse(JSON.stringify(SEED)); seedData.fwDone={}; }
+      state=autoRepair(seedData); pruneFW(); CUR_ACC=seedName; rememberAcc(seedName);
+      await localPersist(seedName,state); lsSetAccounts([seedName]);
+      catchUpDaily(); await refreshAccSel(); document.title='战舰世界 · 资产管理器(本地) · '+seedName; render(); startRolloverWatch();
+      toast('本地模式：数据已保存在此浏览器（LZW 压缩），建议定期点「导出 JSON」备份'); return;
+    }
     let name=lastAcc(); if(!name||accounts.indexOf(name)<0)name=accounts[0];
-    const data=await loadAccount(name);
+    const raw=lsGet(lsDataKey(name)); const data=raw?decompressState(raw):null;
     CUR_ACC=name; state=data?autoRepair(data):JSON.parse(JSON.stringify(SEED)); pruneFW(); rememberAcc(name);
-    catchUpDaily();
-    await refreshAccSel(); document.title='战舰世界 · 资产管理器(预览) · '+name; render(); startRolloverWatch();
-    toast('预览模式：数据只读，本次会话的更改不会保存');
+    catchUpDaily(); await refreshAccSel(); document.title='战舰世界 · 资产管理器(本地) · '+name; render(); startRolloverWatch();
+    toast('本地模式：数据已保存在此浏览器（LZW 压缩）');
     return;
   }
   const accounts=await listAccounts();
